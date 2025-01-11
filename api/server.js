@@ -8,10 +8,32 @@ const NodeCache = require('node-cache');
 const app = express();
 const port = 8080;
 
-app.use(cors());
-
 // Inisialisasi cache dengan TTL default 1 menit
 const cache = new NodeCache({ stdTTL: 60 });
+
+// Discord Webhook URL
+const discordWebhookUrl = 'https://discord.com/api/webhooks/1327531098510458982/woS_zeaiti7fqFMgYcC-O_h4XeLqk8NTXcY9TVVfOOgwu78Iq_GWd5DmyhuxDLn2iPm5';
+
+// Fungsi untuk mengirim log ke Discord webhook
+async function writeLog(message) {
+  const now = new Date();
+  // Konversi ke WIB (UTC+7)
+  const wibOffset = 7 * 60 * 60 * 1000; // Offset dalam milidetik
+  const wibTime = new Date(now.getTime() + wibOffset);
+  const timestamp = wibTime.toISOString().replace('T', ' ').slice(0, 19); // Format: YYYY-MM-DD HH:MM:SS
+
+  const logMessage = `[${timestamp} WIB] ${message}`;
+  console.log(logMessage); // Tetap log ke konsol untuk debug lokal
+
+  try {
+    await axios.post(discordWebhookUrl, {
+      content: logMessage,
+    });
+  } catch (error) {
+    console.error(`Failed to send log to Discord: ${error.message}`);
+  }
+}
+
 
 // Variabel untuk melacak kegagalan sinkronisasi
 let failCount = 0;
@@ -23,9 +45,9 @@ const fivemAxios = axios.create({
     'Accept': 'application/json',
     'Accept-Language': 'en-US,en;q=0.9',
     'Origin': 'https://servers.fivem.net',
-    'Referer': 'https://servers.fivem.net/'
+    'Referer': 'https://servers.fivem.net/',
   },
-  timeout: 5000
+  timeout: 5000,
 });
 
 const hexToDecimal = (s) => {
@@ -66,25 +88,23 @@ const getDiscordDetails = async (discordId) => {
     const response = await axios.get(`https://discordlookup.mesalytic.moe/v1/user/${discordId}`);
     if (response.data) {
       const { id, username, avatar } = response.data;
-      
-      // Periksa apakah avatar dan avatar.id valid
+
       let avatarUrl = "https://i.imgur.com/vneLxLB.png";
       if (avatar && avatar.id) {
         avatarUrl = `https://cdn.discordapp.com/avatars/${id}/${avatar.id}`;
       }
-      
+
       return {
         id,
         username,
-        avatarUrl
+        avatarUrl,
       };
     }
   } catch (error) {
-    console.error('Error fetching Discord user details:', error);
+    writeLog(`Error fetching Discord user details: ${error.message}`);
     return null;
   }
 };
-
 
 async function getImageSize(imageUrl) {
   try {
@@ -92,16 +112,16 @@ async function getImageSize(imageUrl) {
       method: 'get',
       url: imageUrl,
       responseType: 'arraybuffer',
-      httpsAgent: new https.Agent({ rejectUnauthorized: false })
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
     });
     const imageBuffer = Buffer.from(response.data, 'binary');
     const metadata = await sharp(imageBuffer).metadata();
     return {
       width: metadata.width,
-      height: metadata.height
+      height: metadata.height,
     };
   } catch (error) {
-    console.error('Error fetching image size:', error);
+    writeLog(`Error fetching image size: ${error.message}`);
     return null;
   }
 }
@@ -109,28 +129,27 @@ async function getImageSize(imageUrl) {
 async function fetchServerData() {
   let retries = 30;
   let response;
-  
+
   while (retries > 0) {
     try {
       response = await fivemAxios.get('https://servers-frontend.fivem.net/api/servers/single/4ylb3o', {
-        validateStatus: function (status) {
-          return status < 500;
-        }
+        validateStatus: (status) => status < 500,
       });
-      
+
       if (response.status === 200) {
         return response.data.Data;
       }
-      
+
       retries--;
       if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        writeLog(`Retrying to fetch server data. Remaining attempts: ${retries}`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     } catch (retryError) {
-      console.error('Retry attempt failed:', retryError.message);
+      writeLog(`Retry attempt failed: ${retryError.message}`);
       retries--;
       if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
   }
@@ -140,8 +159,13 @@ async function fetchServerData() {
 
 async function syncServerData() {
   try {
+    writeLog('Starting data synchronization...');
+    const cacheKeys = cache.keys();
+    if (!cacheKeys.length) {
+      writeLog('Cache is empty, initiating data fetch.');
+    }
+
     const serverData = await fetchServerData();
-    // Jika berhasil, reset counter kegagalan dan flag eksternalDown
     failCount = 0;
     externalDown = false;
 
@@ -157,82 +181,88 @@ async function syncServerData() {
       discord: serverData?.vars?.Discord ?? '',
       banner: {
         url: serverData?.vars?.banner_connecting ?? '',
-        size: bannerSize ? `${bannerSize.width}x${bannerSize.height}` : 'Unknown'
+        size: bannerSize ? `${bannerSize.width}x${bannerSize.height}` : 'Unknown',
       },
       logofivem: serverData?.ownerAvatar ?? '',
-      players: serverData?.players ?? []
+      players: serverData?.players ?? [],
     };
 
     cache.set('serverDetail', serverDetail);
-    // console.log('Data server berhasil disinkronisasi.');
+    writeLog('Data successfully synchronized.');
   } catch (error) {
     failCount++;
-    console.error(`Sinkronisasi gagal ${failCount} kali:`, error.message);
+    writeLog(`Synchronization failed ${failCount} times: ${error.message}`);
     if (failCount >= 10) {
       externalDown = true;
-      console.error('External server mati setelah 10 kali percobaan gagal.');
+      writeLog('External server marked as down after 10 failed attempts.');
     }
   }
 }
 
-// Jalankan sinkronisasi pertama kali dan kemudian setiap 30 detik
+// Sinkronisasi awal dan pengaturan interval
 syncServerData();
 setInterval(syncServerData, 30000);
 
-// Middleware untuk memeriksa status server eksternal sebelum merespon endpoint
 function checkExternalStatus(req, res, next) {
   if (externalDown) {
+    writeLog('External server is down. Blocking request.');
     return res.status(503).json({ error: 'server eksternal mati' });
   }
   next();
 }
 
-// Endpoint untuk mendapatkan detail server dengan pemeriksaan status
+// Endpoint API
 app.get('/serverdetail', checkExternalStatus, (req, res) => {
   const serverDetail = cache.get('serverDetail');
   if (!serverDetail) {
+    writeLog('Server detail not available. Returning error.');
     return res.status(503).json({ error: 'Data belum tersedia, coba lagi nanti.' });
   }
 
   const { players, ...result } = serverDetail;
+  writeLog('Server detail request processed.');
   res.json(result);
 });
 
 app.get('/playerlist', checkExternalStatus, async (req, res) => {
   const serverDetail = cache.get('serverDetail');
   if (!serverDetail) {
+    writeLog('Player list not available. Returning error.');
     return res.status(503).json({ error: 'Data belum tersedia, coba lagi nanti.' });
   }
 
   try {
-    const playerlist = await Promise.all((serverDetail.players || []).map(async (player) => {
-      const steamProfileUrl = getSteamProfileUrl(player.identifiers ?? []);
-      const discordId = getDiscordId(player.identifiers ?? []);
-      
-      let discordDetails = null;
-      if (discordId) {
-        discordDetails = await getDiscordDetails(discordId);
-        if (discordDetails) {
-          discordDetails = {
-            discordId: discordDetails.id,
-            usernameDiscord: discordDetails.username,
-            discordPhoto: discordDetails.avatarUrl
-          };
+    const playerlist = await Promise.all(
+      (serverDetail.players || []).map(async (player) => {
+        const steamProfileUrl = getSteamProfileUrl(player.identifiers ?? []);
+        const discordId = getDiscordId(player.identifiers ?? []);
+        let discordDetails = null;
+
+        if (discordId) {
+          discordDetails = await getDiscordDetails(discordId);
+          if (discordDetails) {
+            discordDetails = {
+              discordId: discordDetails.id,
+              usernameDiscord: discordDetails.username,
+              discordPhoto: discordDetails.avatarUrl,
+            };
+          }
         }
-      }
-  
-      return {
-        id: player.id ?? '',
-        name: player.name ?? 'Unknown',
-        ping: player.ping ?? 0,
-        steamProfileUrl: steamProfileUrl,
-        discordDetails: discordDetails,
-      };
-    }));
-  
+
+        return {
+          id: player.id ?? '',
+          name: player.name ?? 'Unknown',
+          ping: player.ping ?? 0,
+          steamProfileUrl: steamProfileUrl,
+          discordDetails: discordDetails,
+        };
+      })
+    );
+
+    writeLog('Player list request processed.');
     res.json({ playerlist });
   } catch (error) {
-    console.error('Error processing player list:', error);
+    writeLog(`Error processing player list: ${error.message}`);
     res.status(500).json({ error: 'Terjadi kesalahan saat memproses data pemain.' });
   }
 });
@@ -242,5 +272,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+  writeLog(`Server is running on http://localhost:${port}`);
 });
