@@ -22,7 +22,7 @@ async function writeLog(message) {
   const wibTime = new Date(now.getTime() + wibOffset);
   const timestamp = wibTime.toISOString().replace('T', ' ').slice(0, 19); // Format: YYYY-MM-DD HH:MM:SS
 
-  const logMessage = `[${timestamp} WIB] ${message} --`;
+  const logMessage = `LOG GOOGLE BACKEND [${timestamp} WIB] ${message}`;
   console.log(logMessage); // Tetap log ke konsol untuk debug lokal
 
   try {
@@ -115,7 +115,8 @@ async function getImageSize(imageUrl) {
 }
 
 async function fetchServerData() {
-  let retries = 30;
+  let retries = 5; // Maksimal 5 kali percobaan
+  const retryDelay = 5000; // Jeda 5 detik antar percobaan
   let response;
 
   while (retries > 0) {
@@ -128,30 +129,31 @@ async function fetchServerData() {
           'Origin': 'https://servers.fivem.net',
           'Referer': 'https://servers.fivem.net/',
         },
-        timeout: 15000,
-        validateStatus: (status) => status < 500,
+        timeout: 5000, // Timeout 5 detik
+        validateStatus: (status) => status < 500, // Hanya status di bawah 500 yang valid
       });
 
       if (response.status === 200) {
-        return response.data.Data;
+        return response.data.Data; // Data berhasil diambil
       }
 
       retries--;
+      writeLog(`Retrying to fetch server data. Remaining attempts: ${retries}`);
       if (retries > 0) {
-        writeLog(`Retrying to fetch server data. Remaining attempts: ${retries}`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, retryDelay)); // Tunggu sebelum mencoba ulang
       }
-    } catch (retryError) {
-      writeLog(`Retry attempt failed: ${retryError.message}`);
+    } catch (error) {
       retries--;
+      writeLog(`Retry attempt failed: ${error.message}`);
       if (retries > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, retryDelay)); // Tunggu sebelum mencoba ulang
       }
     }
   }
 
   throw new Error(`Failed to fetch data after retries. Status: ${response?.status}`);
 }
+
 
 async function syncServerData() {
   try {
