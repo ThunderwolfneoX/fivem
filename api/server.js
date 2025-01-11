@@ -6,6 +6,7 @@ const https = require('https');
 const NodeCache = require('node-cache');
 
 const app = express();
+app.use(cors())
 const port = 8080;
 
 // Inisialisasi cache dengan TTL default 1 menit
