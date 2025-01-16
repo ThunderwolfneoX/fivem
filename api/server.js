@@ -115,7 +115,7 @@ async function getImageSize(imageUrl) {
     });
     const imageBuffer = Buffer.from(response.data, 'binary');
     const metadata = await sharp(imageBuffer).metadata();
-    await writeLog(`[getImageSize] -> ${metadata.width}x${metadata.height}`);
+    // await writeLog(`[getImageSize] -> ${metadata.width}x${metadata.height}`);
     return {
       width: metadata.width,
       height: metadata.height
