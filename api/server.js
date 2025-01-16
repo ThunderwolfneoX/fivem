@@ -106,7 +106,7 @@ const getDiscordDetails = async (discordId) => {
 
 async function getImageSize(imageUrl) {
   try {
-    await writeLog(`[getImageSize] Fetching image size: ${imageUrl}`);
+    // await writeLog(`[getImageSize] Fetching image size: ${imageUrl}`);
     const response = await axios({
       method: 'get',
       url: imageUrl,
